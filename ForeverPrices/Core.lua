@@ -5,6 +5,7 @@ local PREFIX = "|cff33ccffForeverPrices|r: "
 local COMPANION_HINT = "Get the free companion app at github.com/Miaphys/ForeverPrices (it keeps prices up to date), then /reload."
 
 local prices        -- itemID -> { min, market, quantity, avg } for the selected house
+local houseID       -- auction house id the prices are for
 local houseName     -- display name of the selected house
 local houseUpdated  -- unix time the selected house's data was taken
 
@@ -27,10 +28,11 @@ local function SelectHouse(id)
   local houses = Data()
   local h = houses and houses[id]
   if not h then
-    prices, houseName, houseUpdated = nil, nil, nil
+    prices, houseID, houseName, houseUpdated = nil, nil, nil, nil
     return false
   end
   prices = ParseHouse(h.data)
+  houseID = id
   houseName = h.name .. " #" .. id
   houseUpdated = h.updated
   return true
@@ -46,6 +48,55 @@ local function Ago(t)
   if s < 3600 then return math.max(1, math.floor(s / 60)) .. "m ago" end
   if s < 172800 then return math.floor(s / 3600) .. "h ago" end
   return math.floor(s / 86400) .. "d ago"
+end
+
+-------------------------------------------------------------------- public API
+-- For other addons. All prices are in copper and for the auction house this
+-- character uses. Everything returns nil until ForeverPrices knows that house
+-- (after login, once it has been detected or set). Check ForeverPrices.IsReady().
+--
+--   ForeverPrices.GetPrice(item)      -> copper or nil
+--       Market price while the item is listed, else its 3-day average.
+--   ForeverPrices.GetPriceInfo(item)  -> table or nil
+--       { market, lowest, average, quantity, listed, updated, house }
+--       market/lowest are 0 and listed is false when none are listed right now.
+--   ForeverPrices.IsReady()           -> true once prices are available
+--   ForeverPrices.GetHouse()          -> houseID, houseName, updated (unix time)
+--
+-- `item` can be an item ID, an item link, or an "item:12345..." string.
+ForeverPrices = ForeverPrices or {}
+ForeverPrices.API_VERSION = 1
+
+local function ItemID(item)
+  if type(item) == "number" then return item end
+  if type(item) == "string" then return tonumber(item:match("item:(%d+)") or item:match("^%d+$")) end
+end
+
+function ForeverPrices.IsReady()
+  return prices ~= nil
+end
+
+function ForeverPrices.GetHouse()
+  return houseID, houseName, houseUpdated
+end
+
+function ForeverPrices.GetPriceInfo(item)
+  local id = prices and ItemID(item)
+  local p = id and prices[id]
+  if not p then return nil end
+  return {
+    market = p[2], lowest = p[1], average = p[4], quantity = p[3],
+    listed = p[3] > 0, updated = houseUpdated, house = houseID,
+  }
+end
+
+function ForeverPrices.GetPrice(item)
+  local id = prices and ItemID(item)
+  local p = id and prices[id]
+  if not p then return nil end
+  if p[3] > 0 then return p[2] end
+  if p[4] > 0 then return p[4] end
+  return nil
 end
 
 -------------------------------------------------------------------- tooltip

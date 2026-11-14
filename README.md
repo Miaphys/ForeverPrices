@@ -35,6 +35,24 @@ group) is its own market, so you see prices from *your* house.
 | AH lowest | the single cheapest listing |
 | AH 3-day avg | moving average of the market price over roughly 3 days |
 
+## For addon authors: price API
+
+Other addons can read ForeverPrices' prices. Add `## OptionalDeps: ForeverPrices` to your `.toc` so it
+loads first. All prices are in copper, for the auction house the player uses.
+
+```lua
+if ForeverPrices and ForeverPrices.IsReady and ForeverPrices.IsReady() then
+  local copper = ForeverPrices.GetPrice(itemLinkOrID)   -- market price, or 3-day avg if none listed; nil if unknown
+  local info = ForeverPrices.GetPriceInfo(itemLinkOrID)
+  -- info = { market, lowest, average, quantity, listed, updated, house }  (nil if unknown)
+  local houseID, houseName, updated = ForeverPrices.GetHouse()
+end
+```
+
+- `item` can be an item ID, an item link, or an `"item:12345..."` string.
+- `IsReady()` is false until the player's auction house is known (right after login, once detected).
+- `ForeverPrices.API_VERSION` is `1`; it only goes up if something changes incompatibly.
+
 ## Repository layout
 
 - `ForeverPrices/`: the addon
