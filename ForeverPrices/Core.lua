@@ -2,6 +2,7 @@
 -- Prices come from the ForeverPrices_Data addon, which the companion app rewrites
 -- from Blizzard's auction data (new data shows up after /reload or relog).
 local PREFIX = "|cff33ccffForeverPrices|r: "
+local COMPANION_HINT = "Get the free companion app at github.com/Miaphys/ForeverPrices (it keeps prices up to date), then /reload."
 
 local prices        -- itemID -> { min, market, quantity, avg } for the selected house
 local houseName     -- display name of the selected house
@@ -184,7 +185,7 @@ SlashCmdList.FOREVERPRICES = function(msg)
     Print("open the auction house and browse or search a few times; your house will be detected.")
   else
     if not Data() then
-      Print("no price data. Run the companion app, then /reload.")
+      Print("no price data yet. " .. COMPANION_HINT)
     elseif houseName then
       Print(("using %s, data updated %s."):format(houseName, Ago(houseUpdated)))
     else
@@ -204,7 +205,7 @@ f:SetScript("OnEvent", function(_, event)
     ForeverPricesDB = ForeverPricesDB or {}
     ForeverPricesCharDB = ForeverPricesCharDB or {}
     if not Data() then
-      Print("no price data found. Run the companion app, then /reload.")
+      Print("no price data yet. " .. COMPANION_HINT)
     elseif not (ForeverPricesCharDB.house and SelectHouse(ForeverPricesCharDB.house)) then
       ForeverPricesCharDB.house = nil
       Print("open the auction house and search for anything once, so I can tell which house you use.")

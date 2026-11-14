@@ -1,6 +1,7 @@
-"""ForeverPrices tray app: runs the companion in the background with an icon by the clock.
+"""ForeverPrices tray app: keeps the ForeverPrices_Data addon up to date, with an icon by the clock.
 
-Right-click menu: Update now, Open log, Notifications, Start with Windows, Quit.
+By default it downloads the hourly price file from the ForeverPrices server (GitHub Pages).
+People with their own Blizzard API credentials can switch to fetching from Blizzard directly.
 Build a single .exe with build.ps1 (PyInstaller).
 """
 from __future__ import annotations
@@ -26,9 +27,11 @@ DATA_DIR = companion.STATE_DIR
 LOG_FILE = DATA_DIR / "companion.log"
 SETTINGS_FILE = DATA_DIR / "settings.json"
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
+REPO_URL = "https://github.com/Miaphys/ForeverPrices"
 DEFAULTS = {
-    "wow": str(companion.DEFAULT_WOW),
+    "wow": "",              # found automatically on first start
     "region": "eu",
+    "source": "server",     # "server" or "blizzard" (own API credentials)
     "creds": str(companion.DEFAULT_CREDS),
     "interval": 600,
     "notify": True,
@@ -52,16 +55,36 @@ def save_settings(s: dict) -> None:
 
 def file_sink(line: str) -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    # keep the log small: start over when it passes 1 MB
-    if LOG_FILE.exists() and LOG_FILE.stat().st_size > 1_000_000:
+    if LOG_FILE.exists() and LOG_FILE.stat().st_size > 1_000_000:  # keep the log small
         LOG_FILE.replace(LOG_FILE.with_suffix(".old.log"))
     with LOG_FILE.open("a", encoding="utf-8") as f:
         f.write(f"{time.strftime('%Y-%m-%d')} {line}\n")
 
 
+def pick_folder(prompt: str) -> str:
+    """Windows folder picker (via PowerShell, so no extra GUI library is needed)."""
+    script = (
+        "Add-Type -AssemblyName System.Windows.Forms;"
+        "$d = New-Object System.Windows.Forms.FolderBrowserDialog;"
+        f"$d.Description = '{prompt}';"
+        "if ($d.ShowDialog() -eq 'OK') { $d.SelectedPath }"
+    )
+    try:
+        out = subprocess.run(["powershell", "-NoProfile", "-STA", "-Command", script],
+                             capture_output=True, text=True, timeout=600,
+                             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        return out.stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
+def message(text: str, error: bool = False) -> None:
+    ctypes.windll.user32.MessageBoxW(None, text, APP, 0x10 if error else 0x40)
+
+
 # ---------------------------------------------------------------- icon
 def make_icon(state: str = "ok", size: int = 64) -> Image.Image:
-    """A gold coin; a red dot in the corner on errors."""
+    """A gold coin; a blue dot while working, a red dot on errors."""
     img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
     s = size / 64
@@ -69,10 +92,9 @@ def make_icon(state: str = "ok", size: int = 64) -> Image.Image:
     d.ellipse((8 * s, 8 * s, 56 * s, 56 * s), fill=(242, 190, 50))
     d.ellipse((14 * s, 12 * s, 34 * s, 26 * s), fill=(255, 231, 140))  # shine
     d.ellipse((20 * s, 20 * s, 44 * s, 44 * s), outline=(176, 120, 22), width=max(1, int(4 * s)))
-    if state == "error":
-        d.ellipse((38 * s, 38 * s, 63 * s, 63 * s), fill=(215, 40, 40), outline=(255, 255, 255), width=max(1, int(2 * s)))
-    elif state == "busy":
-        d.ellipse((38 * s, 38 * s, 63 * s, 63 * s), fill=(60, 150, 235), outline=(255, 255, 255), width=max(1, int(2 * s)))
+    dot = {"error": (215, 40, 40), "busy": (60, 150, 235)}.get(state)
+    if dot:
+        d.ellipse((38 * s, 38 * s, 63 * s, 63 * s), fill=dot, outline=(255, 255, 255), width=max(1, int(2 * s)))
     return img
 
 
@@ -114,13 +136,22 @@ class TrayApp:
         self.icon = pystray.Icon(APP, make_icon("busy"), f"{APP}: starting…", menu=self.menu())
 
     def menu(self) -> pystray.Menu:
+        def region_item(code, label):
+            return pystray.MenuItem(label, lambda *_: self.set_region(code), radio=True,
+                                    checked=lambda _: self.settings["region"] == code)
         return pystray.Menu(
             pystray.MenuItem(lambda _: self.status, None, enabled=False),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("Update now", self.on_update_now, default=True),
+            pystray.MenuItem("Region", pystray.Menu(region_item("eu", "Europe (EU)"), region_item("us", "Americas (US)"))),
+            pystray.MenuItem("Choose WoW folder…", self.on_choose_wow),
             pystray.MenuItem("Open log", self.on_open_log),
             pystray.MenuItem("Notifications", self.on_toggle_notify, checked=lambda _: self.settings["notify"]),
             pystray.MenuItem("Start with Windows", self.on_toggle_autostart, checked=lambda _: autostart_enabled()),
+            pystray.MenuItem("Use my own Blizzard API key", self.on_toggle_source,
+                             checked=lambda _: self.settings["source"] == "blizzard",
+                             visible=lambda _: Path(self.settings["creds"]).exists()),
+            pystray.MenuItem("About / help", lambda *_: os.startfile(REPO_URL)),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("Quit", self.on_quit),
         )
@@ -131,9 +162,34 @@ class TrayApp:
         self.icon.title = f"{APP}: {text}"[:127]
         self.icon.update_menu()
 
+    def change(self, key, value):
+        self.settings[key] = value
+        save_settings(self.settings)
+        self.wake.set()
+
     # menu actions
     def on_update_now(self, *_):
         self.wake.set()
+
+    def set_region(self, code):
+        self.change("region", code)
+
+    def on_choose_wow(self, *_):
+        threading.Thread(target=self.ask_wow_folder, daemon=True).start()
+
+    def ask_wow_folder(self) -> bool:
+        path = pick_folder("Select your World of Warcraft _forever_ folder")
+        if not path:
+            return False
+        p = Path(path)
+        if not companion.is_wow_forever(p) and companion.is_wow_forever(p / "_forever_"):
+            p = p / "_forever_"
+        if not companion.is_wow_forever(p):
+            message(f"That doesn't look like a WoW Forever folder:\n{path}\n\n"
+                    "Pick the _forever_ folder inside your World of Warcraft folder (the one with Wow.exe).", error=True)
+            return False
+        self.change("wow", str(p))
+        return True
 
     def on_open_log(self, *_):
         if not LOG_FILE.exists():
@@ -141,11 +197,13 @@ class TrayApp:
         os.startfile(LOG_FILE)
 
     def on_toggle_notify(self, *_):
-        self.settings["notify"] = not self.settings["notify"]
-        save_settings(self.settings)
+        self.change("notify", not self.settings["notify"])
 
     def on_toggle_autostart(self, *_):
         set_autostart(not autostart_enabled())
+
+    def on_toggle_source(self, *_):
+        self.change("source", "server" if self.settings["source"] == "blizzard" else "blizzard")
 
     def on_quit(self, *_):
         self.stopping.set()
@@ -153,37 +211,62 @@ class TrayApp:
         self.icon.stop()
 
     # background loop
-    def worker(self):
+    def wow_folder(self) -> Path | None:
         s = self.settings
-        addon_dir = Path(s["wow"]) / "Interface" / "AddOns" / companion.DATA_ADDON
-        state_file = companion.STATE_DIR / f"state-{s['region']}.json"
-        api = companion.Blizzard(s["region"], Path(s["creds"]))
-        companion.log(f"tray app started: region {s['region']}, writing to {addon_dir}")
-        if not Path(s["wow"], "Interface").is_dir():
-            companion.log(f"WoW folder not found: {s['wow']} (edit {SETTINGS_FILE})")
-            self.set_status("WoW folder not found, see log", "error")
-            return
+        if s["wow"] and companion.is_wow_forever(Path(s["wow"])):
+            return Path(s["wow"])
+        found = companion.find_wow()
+        if found:
+            companion.log(f"found WoW Forever at {found}")
+            self.change("wow", str(found))
+            return found
+        return None
+
+    def update_once(self) -> str:
+        s = self.settings
+        wow = self.wow_folder()
+        if not wow:
+            self.set_status("WoW folder not found: right-click > Choose WoW folder…", "error")
+            if not getattr(self, "_asked_folder", False):
+                self._asked_folder = True
+                message("ForeverPrices couldn't find World of Warcraft: Forever.\n\n"
+                        "Please select your _forever_ folder (inside your World of Warcraft folder).")
+                self.ask_wow_folder()
+            return "error"
+        addon_dir = wow / "Interface" / "AddOns" / companion.DATA_ADDON
+        region = s["region"]
+        if s["source"] == "blizzard" and Path(s["creds"]).exists():
+            api = companion.Blizzard(region, Path(s["creds"]))
+            state_file = companion.STATE_DIR / f"state-{region}.json"
+            result = companion.run_once(api, region, addon_dir, state_file)
+            newest = companion.latest_snapshot(state_file)
+        else:
+            result, newest = companion.run_from_server(region, addon_dir)
+        when = time.strftime("%H:%M", time.localtime(newest)) if newest else "?"
+        tag = region.upper()
+        if result == "pending":
+            self.set_status(f"{tag} prices from {when}, newer ones on the way")
+        else:
+            self.set_status(f"{tag} prices from {when}")
+        if result == "updated" and s["notify"]:
+            self.icon.notify(f"New {tag} auction prices from {when}. /reload in game to see them.", APP)
+        return result
+
+    def worker(self):
+        companion.log(f"tray app started (companion v{companion.VERSION})")
         while not self.stopping.is_set():
             self.set_status("checking for new prices…", "busy")
             result = "unchanged"
             try:
-                result = companion.run_once(api, s["region"], addon_dir, state_file)
-                snap = companion.latest_snapshot(state_file)
-                when = time.strftime("%H:%M", time.localtime(snap)) if snap else "?"
-                if result == "pending":
-                    self.set_status(f"prices from {when}, Blizzard is still publishing newer ones", "ok")
-                else:
-                    self.set_status(f"prices from {when}", "ok")
-                if result == "updated" and s["notify"]:
-                    self.icon.notify(f"New auction prices from {when}. /reload in game to see them.", APP)
-            except SystemExit as e:  # bad credentials file
+                result = self.update_once()
+            except SystemExit as e:  # bad credentials file (own-key mode)
                 companion.log(str(e))
                 self.set_status("credentials problem, see log", "error")
-            except Exception as e:  # network trouble, Blizzard hiccups, anything else
+            except Exception as e:  # network trouble, server hiccups, anything else
                 companion.log(f"update failed, will retry: {e}")
                 file_sink(traceback.format_exc().rstrip())
                 self.set_status("update failed, retrying (see log)", "error")
-            wait = min(120, s["interval"]) if result == "pending" else s["interval"]
+            wait = min(120, self.settings["interval"]) if result == "pending" else self.settings["interval"]
             self.wake.wait(wait)
             self.wake.clear()
 
@@ -205,7 +288,7 @@ def already_running() -> bool:
 def main():
     companion.log_sink = file_sink
     if already_running():
-        ctypes.windll.user32.MessageBoxW(None, "ForeverPrices is already running (look for the coin by the clock).", APP, 0x40)
+        message("ForeverPrices is already running (look for the gold coin by the clock).")
         return
     TrayApp().run()
 

@@ -226,6 +226,102 @@ def write_addon(addon_dir: Path, region: str, houses: dict, state: dict) -> int:
     return (addon_dir / "Data.lua").stat().st_size
 
 
+# ---------------------------------------------------------------- server mode
+SERVER_URL = "https://miaphys.github.io/ForeverPrices"
+SERVER_FORMAT = 1
+
+
+def newest_snapshot(state: dict) -> int:
+    return max((h.get("updated", 0) for h in state.get("houses", {}).values() if h.get("items")), default=0)
+
+
+def run_from_server(region: str, addon_dir: Path, base: str = SERVER_URL) -> tuple[str, int]:
+    """Download the published price file and write the data addon.
+
+    Returns (status, newest snapshot time). status: "updated" or "unchanged".
+    Uses ETag so an unchanged file costs a few hundred bytes, not ~400 KB.
+    """
+    meta_file = STATE_DIR / f"server-{region}.json"
+    try:
+        meta = json.loads(meta_file.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        meta = {}
+    addon_ok = (addon_dir / "Data.lua").exists()
+    headers = {"Accept-Encoding": "gzip", "User-Agent": f"ForeverPrices-companion/{VERSION}"}
+    if meta.get("etag") and addon_ok:
+        headers["If-None-Match"] = meta["etag"]
+    req = urllib.request.Request(f"{base.rstrip('/')}/{region}.json", headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            body = r.read()
+            if r.headers.get("Content-Encoding") == "gzip":
+                body = gzip.decompress(body)
+            etag = r.headers.get("ETag")
+    except urllib.error.HTTPError as e:
+        if e.code == 304:
+            return "unchanged", meta.get("newest", 0)
+        raise
+
+    state = json.loads(body)
+    if state.get("format") != SERVER_FORMAT or state.get("region") != region or not isinstance(state.get("houses"), dict):
+        raise ValueError("price file from the server has an unexpected format (is the companion out of date?)")
+    newest = newest_snapshot(state)
+    if addon_ok and newest == meta.get("newest"):
+        status = "unchanged"
+    else:
+        names = {hid: h.get("name", "Auction House") for hid, h in state["houses"].items()}
+        size = write_addon(addon_dir, region, names, state)
+        log(f"wrote {addon_dir / 'Data.lua'} ({size / 1024:.0f} KB), prices from "
+            f"{time.strftime('%H:%M', time.localtime(newest))}. /reload in game to see them.")
+        status = "updated"
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    meta_file.write_text(json.dumps({"etag": etag, "newest": newest}), encoding="utf-8")
+    return status, newest
+
+
+# ---------------------------------------------------------------- finding WoW
+def wow_candidates() -> list[Path]:
+    """Likely WoW Forever folders, best guesses first."""
+    roots: list[Path] = []
+    try:
+        import winreg
+        for hive, base in ((winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"),
+                           (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall")):
+            try:
+                with winreg.OpenKey(hive, base) as k:
+                    for i in range(winreg.QueryInfoKey(k)[0]):
+                        try:
+                            with winreg.OpenKey(k, winreg.EnumKey(k, i)) as sub:
+                                if "Warcraft" in str(winreg.QueryValueEx(sub, "DisplayName")[0]):
+                                    roots.append(Path(winreg.QueryValueEx(sub, "InstallLocation")[0]))
+                        except OSError:
+                            continue
+            except OSError:
+                continue
+    except ImportError:
+        pass
+    for drive in "CDEFGH":
+        for p in (r"Program Files (x86)\World of Warcraft", r"Program Files\World of Warcraft",
+                  "World of Warcraft", r"Games\World of Warcraft", r"Battle.net\World of Warcraft"):
+            roots.append(Path(f"{drive}:\\") / p)
+    seen, out = set(), []
+    for r in roots:
+        for p in (r / "_forever_", r):
+            key = str(p).lower()
+            if key not in seen:
+                seen.add(key)
+                out.append(p)
+    return out
+
+
+def is_wow_forever(p: Path) -> bool:
+    return p.is_dir() and p.name.lower() == "_forever_" and (p / "Wow.exe").exists()
+
+
+def find_wow() -> Path | None:
+    return next((p for p in wow_candidates() if is_wow_forever(p)), None)
+
+
 # ---------------------------------------------------------------- main loop
 def local_time(lm: str | None) -> str:
     if not lm:
