@@ -147,10 +147,46 @@ else
   end)
 end
 
+-------------------------------------------------------------------- ruleset -> house
+-- Forever's auction houses come in groups of (Alliance, Horde, Blackwater), one
+-- group per ruleset; the API doesn't say which is which, so this is from players:
+--   Normal: 111 / 114 / 117  confirmed (two accounts)
+--   PvP:    110 / 113 / 116  deduced (the other big group); verified in the AH, see below
+--   RP, RP-PvP: 119-125, not known yet which is which; Hardcore: probably 112-118 (empty)
+-- Unknown rulesets fall back to detecting the house from AH prices.
+local KNOWN_HOUSES = {
+  PvE = { Alliance = 111, Horde = 114, Blackwater = 117, confirmed = true },
+  PvP = { Alliance = 110, Horde = 113, Blackwater = 116 },
+}
+
+local function Ruleset()
+  if not (C_GameRules and C_GameRules.IsGameRuleActive and Enum and Enum.GameRule) then return nil end
+  local R = Enum.GameRule
+  local function On(rule)
+    if not rule then return false end
+    local ok, v = pcall(C_GameRules.IsGameRuleActive, rule)
+    return ok and v == true
+  end
+  if On(R.HardcoreRuleset) then return "HC" end
+  local pvp, rp = On(R.PvPRuleset), On(R.RPRuleset)
+  if pvp and rp then return "RPPvP" end
+  if pvp then return "PvP" end
+  if rp then return "RP" end
+  return "PvE"
+end
+
+-- House for this character from the table, or nil if the ruleset isn't known.
+local function KnownHouse()
+  local group = KNOWN_HOUSES[Ruleset() or ""]
+  local id = group and group[UnitFactionGroup("player") or ""]
+  if id and Data() and Data()[id] then return id, group.confirmed end
+end
+
 -------------------------------------------------------------------- house detection
 -- Every auction house is its own market. While browsing the AH we compare the
 -- lowest prices on screen with each same-faction house in the data and pick
--- the one that matches.
+-- the one that matches. A house taken from an unconfirmed table entry is
+-- checked the same way the first time, and corrected if the AH disagrees.
 local seen, seenCount = {}, 0
 local candidates -- houseID -> parsed prices (only while detecting)
 
@@ -186,14 +222,23 @@ local function TryDetect()
   if not best or best.close < 5 or best.close < best.compared * 0.5 then return end
   if second and best.close < second.close * 1.5 + 2 then return end
 
+  local previous = ForeverPricesCharDB.house
   ForeverPricesCharDB.house = best.id
+  ForeverPricesCharDB.houseSource = "detected"
   candidates, seen, seenCount = nil, {}, 0
+  if previous == best.id then return end  -- the ruleset guess was right; nothing to say
   SelectHouse(best.id)
-  Print(("detected your auction house: %s (%d of %d prices matched). Prices are now in tooltips."):format(houseName, best.close, best.compared))
+  if previous then
+    Print(("the auction house prices match %s better, switched to it (%d of %d prices matched)."):format(houseName, best.close, best.compared))
+  else
+    Print(("detected your auction house: %s (%d of %d prices matched). Prices are now in tooltips."):format(houseName, best.close, best.compared))
+  end
 end
 
 local function OnBrowseResults()
-  if ForeverPricesCharDB.house or not C_AuctionHouse then return end
+  if not C_AuctionHouse then return end
+  -- Keep listening while the house is unknown or only guessed from the ruleset.
+  if ForeverPricesCharDB.house and ForeverPricesCharDB.houseSource ~= "ruleset" then return end
   for _, r in ipairs(C_AuctionHouse.GetBrowseResults() or {}) do
     local id = r.itemKey and r.itemKey.itemID
     if id and r.minPrice and r.minPrice > 0 then
@@ -226,19 +271,23 @@ SlashCmdList.FOREVERPRICES = function(msg)
   elseif cmd == "house" and tonumber(arg) then
     if SelectHouse(tonumber(arg)) then
       ForeverPricesCharDB.house = tonumber(arg)
+      ForeverPricesCharDB.houseSource = "manual"
       Print("using " .. houseName .. ".")
     else
       Print("no data for house " .. arg .. ". See /fp houses.")
     end
   elseif cmd == "detect" then
-    ForeverPricesCharDB.house = nil
-    prices, candidates, seen, seenCount = nil, nil, {}, 0
+    ForeverPricesCharDB.house, ForeverPricesCharDB.houseSource = nil, nil
+    prices, houseID, houseName, houseUpdated = nil, nil, nil, nil
+    candidates, seen, seenCount = nil, {}, 0
     Print("open the auction house and browse or search a few times; your house will be detected.")
   else
     if not Data() then
       Print("no price data yet. " .. COMPANION_HINT)
     elseif houseName then
-      Print(("using %s, data updated %s."):format(houseName, Ago(houseUpdated)))
+      local how = ({ known = " (from your ruleset)", ruleset = " (from your ruleset, double-checked next time you search the AH)",
+                     detected = " (detected)", manual = " (set by you)" })[ForeverPricesCharDB.houseSource or ""] or ""
+      Print(("using %s%s, data updated %s. Ruleset: %s."):format(houseName, how, Ago(houseUpdated), Ruleset() or "?"))
     else
       Print("house not detected yet: open the AH and search for anything.")
     end
@@ -258,8 +307,16 @@ f:SetScript("OnEvent", function(_, event)
     if not Data() then
       Print("no price data yet. " .. COMPANION_HINT)
     elseif not (ForeverPricesCharDB.house and SelectHouse(ForeverPricesCharDB.house)) then
-      ForeverPricesCharDB.house = nil
-      Print("open the auction house and search for anything once, so I can tell which house you use.")
+      local id, confirmed = KnownHouse()
+      if id then
+        -- Known ruleset: prices right away. Unconfirmed entries get checked in the AH.
+        ForeverPricesCharDB.house = id
+        ForeverPricesCharDB.houseSource = confirmed and "known" or "ruleset"
+        SelectHouse(id)
+      else
+        ForeverPricesCharDB.house, ForeverPricesCharDB.houseSource = nil, nil
+        Print("open the auction house and search for anything once, so I can tell which house you use.")
+      end
     end
   else
     OnBrowseResults()
