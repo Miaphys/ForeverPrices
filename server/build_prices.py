@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import sys
 import time
 import urllib.error
@@ -81,21 +82,22 @@ def write_site(out: Path, region: str, state: dict) -> int:
     return path.stat().st_size
 
 
+WEB_DIR = Path(__file__).resolve().parent.parent / "web"
+
+
 def write_index(out: Path, states: dict) -> None:
-    rows = []
+    """Landing page (static files from web/) plus a small status.json it reads."""
+    for f in WEB_DIR.iterdir():
+        if f.is_file():
+            shutil.copyfile(f, out / f.name)
+    status = {"generated": int(time.time()), "regions": {}}
     for region, st in states.items():
-        newest = max((h.get("updated", 0) for h in st.get("houses", {}).values() if h.get("items")), default=0)
-        items = sum(len(h.get("items", {})) for h in st.get("houses", {}).values())
-        rows.append(f"<tr><td>{region.upper()}</td><td>{time.strftime('%Y-%m-%d %H:%M UTC', time.gmtime(newest))}</td>"
-                    f"<td>{items}</td><td><a href='{region}.json'>{region}.json</a></td></tr>")
-    (out / "index.html").write_text(
-        "<!doctype html><meta charset='utf-8'><title>ForeverPrices data</title>"
-        "<style>body{font:15px system-ui;margin:2em;background:#111;color:#ddd}td,th{padding:4px 12px;text-align:left}"
-        "a{color:#6cf}</style><h1>ForeverPrices price data</h1>"
-        "<p>Auction prices for WoW Forever, refreshed hourly from Blizzard's API. Used by the "
-        "<a href='https://github.com/Miaphys/ForeverPrices'>ForeverPrices</a> companion app.</p>"
-        "<table><tr><th>Region</th><th>Newest snapshot</th><th>Item rows</th><th>File</th></tr>"
-        + "".join(rows) + "</table>", encoding="utf-8")
+        houses = st.get("houses", {}).values()
+        status["regions"][region] = {
+            "newest": max((h.get("updated", 0) for h in houses if h.get("items")), default=0),
+            "items": sum(len(h.get("items", {})) for h in houses),
+        }
+    (out / "status.json").write_text(json.dumps(status), encoding="utf-8")
 
 
 def main() -> None:

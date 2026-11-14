@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ForeverPrices</title>
+<meta name="description" content="Auction house prices in your item tooltips for WoW Forever, updated every hour. No scanning needed.">
+<link rel="icon" href="icon.png">
+<style>
+  :root {
+    --bg: #0f1013; --panel: #17191e; --panel2: #1d2027; --line: #2a2e37;
+    --text: #e6e3dc; --muted: #9a978f; --gold: #f2be32; --gold2: #ffd76a;
+    --blue: #66ccff; --green: #3fbf6b; --radius: 12px;
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 16px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  a { color: var(--gold2); }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 0 16px; }
+
+  header { padding: 56px 0 32px; }
+  .hero { display: grid; grid-template-columns: 1.1fr 0.9fr; gap: 40px; align-items: center; }
+  .brand { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; }
+  .brand img { width: 44px; height: 44px; }
+  .brand span { font-weight: 700; font-size: 20px; letter-spacing: .2px; }
+  h1 { font-size: clamp(30px, 5vw, 44px); line-height: 1.15; margin: 0 0 14px; }
+  h1 em { font-style: normal; color: var(--gold); }
+  .lead { color: var(--muted); font-size: 18px; margin: 0 0 26px; max-width: 34em; }
+  .cta { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+  .btn { display: inline-flex; align-items: center; gap: 10px; padding: 13px 20px; border-radius: 10px;
+         font-weight: 650; text-decoration: none; border: 1px solid transparent; }
+  .btn.primary { background: linear-gradient(#ffd25a, #e9a91c); color: #1b1404; }
+  .btn.primary:hover { filter: brightness(1.06); }
+  .btn.ghost { border-color: var(--line); color: var(--text); background: var(--panel); }
+  .btn.ghost:hover { border-color: #3a3f4b; }
+  .small { color: var(--muted); font-size: 14px; }
+  .status { margin-top: 18px; font-size: 14px; color: var(--muted); }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--green);
+         margin-right: 6px; vertical-align: 1px; box-shadow: 0 0 0 3px rgba(63,191,107,.15); }
+
+  /* tooltip mock-up */
+  .tooltip { background: rgba(8, 10, 22, .96); border: 1px solid #5d6475; border-radius: 6px;
+             padding: 10px 12px; font: 14px/1.45 "Segoe UI", Arial, sans-serif; color: #fff;
+             box-shadow: 0 10px 40px rgba(0,0,0,.5), inset 0 0 0 1px #000; max-width: 340px; margin-left: auto; }
+  .tooltip .name { color: #fff; font-size: 15px; }
+  .tooltip .grey { color: #9d9d9d; }
+  .tooltip .row { display: flex; justify-content: space-between; gap: 18px; }
+  .tooltip .k { color: var(--blue); }
+  .tooltip .gap { height: 10px; }
+  .coin { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin: 0 4px 0 1px; vertical-align: -1px; }
+  .g { background: #e8b923; } .s { background: #c7c7cf; } .c { background: #c06a2e; }
+
+  section { padding: 34px 0; border-top: 1px solid var(--line); }
+  h2 { font-size: 24px; margin: 0 0 18px; }
+  .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; counter-reset: s; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px; }
+  .steps .card::before { counter-increment: s; content: counter(s); display: inline-grid; place-items: center;
+                         width: 28px; height: 28px; border-radius: 50%; background: var(--panel2);
+                         border: 1px solid var(--line); color: var(--gold); font-weight: 700; margin-bottom: 10px; }
+  .card h3 { margin: 0 0 6px; font-size: 17px; }
+  .card p { margin: 0; color: var(--muted); font-size: 15px; }
+  code { background: var(--panel2); border: 1px solid var(--line); border-radius: 5px; padding: 1px 5px; font-size: 14px; color: var(--text); }
+
+  .features { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+  table { width: 100%; border-collapse: collapse; font-size: 15px; }
+  td { padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  td:first-child { color: var(--blue); white-space: nowrap; }
+
+  details { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 18px; margin-bottom: 10px; }
+  summary { cursor: pointer; font-weight: 600; }
+  details p { color: var(--muted); margin: 10px 0 0; }
+
+  footer { border-top: 1px solid var(--line); padding: 26px 0 40px; color: var(--muted); font-size: 14px; }
+  footer .wrap { display: flex; flex-wrap: wrap; gap: 8px 20px; justify-content: space-between; }
+
+  @media (max-width: 760px) {
+    header { padding-top: 32px; }
+    .hero { grid-template-columns: 1fr; gap: 28px; }
+    .tooltip { margin: 0; max-width: none; }
+    .steps, .features { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap hero">
+    <div>
+      <div class="brand"><img src="icon.png" alt=""><span>ForeverPrices</span></div>
+      <h1>Auction prices in your tooltips, <em>always up to date</em>.</h1>
+      <p class="lead">For World of Warcraft: Forever. Hover any item and see what it sells for on your auction house.
+        No scanning, no setup screens: prices refresh every hour on their own.</p>
+      <div class="cta">
+        <a class="btn primary" id="dl-exe" href="https://github.com/Miaphys/ForeverPrices/releases">⬇ Download companion app</a>
+        <a class="btn ghost" id="dl-addon" href="https://github.com/Miaphys/ForeverPrices/releases">Addon (.zip)</a>
+      </div>
+      <p class="small" id="version">Free, Windows. Latest version on GitHub.</p>
+      <p class="status" id="status"><span class="dot"></span>Prices are refreshed hourly from Blizzard's auction data.</p>
+    </div>
+    <div class="tooltip" aria-label="Example item tooltip">
+      <div class="name">Linen Cloth</div>
+      <div>Max Stack: 200</div>
+      <div class="row"><span>Sell Price:</span><span>5<span class="coin c"></span></span></div>
+      <div class="gap"></div>
+      <div class="row"><span class="k">AH market (x20)</span><span>5<span class="coin s"></span>80<span class="coin c"></span></span></div>
+      <div class="row"><span class="k">AH lowest (x20)</span><span>4<span class="coin s"></span>80<span class="coin c"></span></span></div>
+      <div class="row"><span class="k">AH 3-day avg (x20)</span><span>5<span class="coin s"></span>60<span class="coin c"></span></span></div>
+      <div class="row"><span></span><span class="grey">13,753 listed, updated 22m ago</span></div>
+    </div>
+  </div>
+</header>
+
+<section>
+  <div class="wrap">
+    <h2>Get started in 2 minutes</h2>
+    <div class="steps">
+      <div class="card"><h3>Install the addon</h3>
+        <p>Extract the addon zip into <code>_forever_\Interface\AddOns</code>.</p></div>
+      <div class="card"><h3>Run the companion</h3>
+        <p>Start <code>ForeverPrices.exe</code>. A gold coin appears by your clock; it finds WoW by itself and keeps prices fresh.</p></div>
+      <div class="card"><h3>Log in</h3>
+        <p>On Normal and PvP, prices show up right away. On other rulesets, search the auction house once first.</p></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap features">
+    <div>
+      <h2>What you see</h2>
+      <table>
+        <tr><td>AH market</td><td>The typical price: average of the cheapest 25% listed, ignoring silly outliers.</td></tr>
+        <tr><td>AH lowest</td><td>The single cheapest listing right now.</td></tr>
+        <tr><td>AH 3-day avg</td><td>The market price averaged over about 3 days, to spot bargains.</td></tr>
+        <tr><td>Stacks</td><td>Bag stacks show the whole stack's price; hold Shift for one.</td></tr>
+      </table>
+    </div>
+    <div>
+      <h2>Why it's different</h2>
+      <table>
+        <tr><td>No scanning</td><td>Prices come from Blizzard's own hourly auction data for every house.</td></tr>
+        <tr><td>Your house</td><td>Every Forever auction house is its own market; you see prices from yours.</td></tr>
+        <tr><td>EU &amp; US</td><td>Both regions, switch in the coin's right-click menu.</td></tr>
+        <tr><td>Open source</td><td>All code is on GitHub under the MIT license.</td></tr>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Questions</h2>
+    <details><summary>Windows says "Windows protected your PC"</summary>
+      <p>The app isn't code-signed yet (signing certificates cost money), so Windows warns about it. Click
+        <b>More info</b>, then <b>Run anyway</b>. The code is open on GitHub and each release lists the file's SHA-256 fingerprint.</p></details>
+    <details><summary>Why do I need the companion app?</summary>
+      <p>WoW addons can't use the internet. The companion downloads the latest prices and writes them where the addon can read them.
+        It's tiny, sits by your clock, and downloads about 0.5 MB an hour.</p></details>
+    <details><summary>My prices didn't change while playing</summary>
+      <p>WoW only loads addon data at login or <code>/reload</code>. The coin shows a notification when new prices are ready.</p></details>
+    <details><summary>Does it need my Battle.net login?</summary>
+      <p>No. It never touches your account or the game itself; it only downloads public price data and writes one addon file.</p></details>
+    <details><summary>For addon authors</summary>
+      <p>Other addons can read the prices: <code>ForeverPrices.GetPrice(item)</code> and more. See the
+        <a href="https://github.com/Miaphys/ForeverPrices#for-addon-authors-price-api">README</a>.</p></details>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <span>ForeverPrices · MIT license · not affiliated with Blizzard Entertainment</span>
+    <span><a href="https://github.com/Miaphys/ForeverPrices">GitHub</a> · <a href="https://github.com/Miaphys/ForeverPrices/issues">Report a problem</a> · <a href="status.json">Data status</a></span>
+  </div>
+</footer>
+
+<script>
+  // Fill in the newest release's download links (falls back to the releases page).
+  fetch("https://api.github.com/repos/Miaphys/ForeverPrices/releases?per_page=5")
+    .then(function (r) { return r.ok ? r.json() : []; })
+    .then(function (releases) {
+      var rel = releases && releases[0];
+      if (!rel) return;
+      (rel.assets || []).forEach(function (a) {
+        if (/\.exe$/i.test(a.name)) document.getElementById("dl-exe").href = a.browser_download_url;
+        if (/addon.*\.zip$/i.test(a.name)) document.getElementById("dl-addon").href = a.browser_download_url;
+      });
+      document.getElementById("version").textContent =
+        "Free, Windows. Version " + rel.tag_name.replace(/^v/, "") + (rel.prerelease ? " (test release)" : "") + ".";
+    })
+    .catch(function () {});
+
+  // Show how fresh the price data is.
+  fetch("status.json", { cache: "no-store" })
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (s) {
+      if (!s || !s.regions) return;
+      var parts = Object.keys(s.regions).map(function (k) {
+        var t = s.regions[k].newest;
+        if (!t) return null;
+        var mins = Math.max(1, Math.round((Date.now() / 1000 - t) / 60));
+        return k.toUpperCase() + " " + (mins < 120 ? mins + " min" : Math.round(mins / 60) + " h") + " ago";
+      }).filter(Boolean);
+      if (parts.length) document.getElementById("status").innerHTML =
+        '<span class="dot"></span>Latest prices: ' + parts.join(" · ") + ". Refreshed hourly.";
+    })
+    .catch(function () {});
+</script>
+</body>
+</html>
