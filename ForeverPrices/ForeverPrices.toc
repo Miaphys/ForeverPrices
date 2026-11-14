@@ -1,0 +1,10 @@
+## Interface: 16001
+## Title: ForeverPrices
+## Notes: Auction house prices in item tooltips, kept up to date by the ForeverPrices companion app.
+## Author: ForeverPrices
+## Version: 0.1.0
+## OptionalDeps: ForeverPrices_Data
+## SavedVariables: ForeverPricesDB
+## SavedVariablesPerCharacter: ForeverPricesCharDB
+
+Core.lua

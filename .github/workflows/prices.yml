@@ -1,0 +1,63 @@
+name: Update prices
+
+on:
+  schedule:
+    # Blizzard publishes new auction snapshots hourly (EU ~:19, US ~:17; big houses a few
+    # minutes later). Two runs an hour: the second catches anything the first missed or
+    # a schedule start that GitHub delayed.
+    - cron: "24,46 * * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+  actions: write   # keep-alive below
+
+concurrency:
+  group: prices
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Build price files
+        id: build
+        env:
+          BNET_ID: ${{ secrets.BNET_ID }}
+          BNET_SECRET: ${{ secrets.BNET_SECRET }}
+        run: python server/build_prices.py --out site --previous "https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}"
+
+      - name: Configure Pages
+        if: steps.build.outputs.changed == 'true'
+        uses: actions/configure-pages@v5
+
+      - name: Upload site
+        if: steps.build.outputs.changed == 'true'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - name: Deploy to GitHub Pages
+        id: deploy
+        if: steps.build.outputs.changed == 'true'
+        uses: actions/deploy-pages@v4
+
+      # GitHub switches off scheduled workflows in public repos after 60 days without
+      # commits. Re-enabling it on every run keeps the hourly job alive.
+      - name: Keep schedule alive
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow enable prices.yml --repo "${{ github.repository }}" || true
