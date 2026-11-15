@@ -128,7 +128,8 @@ def main() -> None:
     # Tell the workflow whether anything changed, so it can skip deploying.
     if os.environ.get("GITHUB_OUTPUT"):
         with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
-            f.write(f"changed={'true' if total_changed else 'false'}\n")
+            force = os.environ.get("FORCE_DEPLOY") == "true"  # landing page pushed
+            f.write(f"changed={'true' if total_changed or force else 'false'}\n")
     core.log(f"done: {total_changed} house(s) updated")
 
 

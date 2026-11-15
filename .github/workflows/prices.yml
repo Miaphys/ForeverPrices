@@ -7,6 +7,10 @@ on:
     # a schedule start that GitHub delayed.
     - cron: "24,46 * * * *"
   workflow_dispatch: {}
+  # Landing page changes go live right away (not only when new prices arrive).
+  push:
+    branches: [main]
+    paths: ["web/**"]
 
 permissions:
   contents: read
@@ -37,6 +41,7 @@ jobs:
         env:
           BNET_ID: ${{ secrets.BNET_ID }}
           BNET_SECRET: ${{ secrets.BNET_SECRET }}
+          FORCE_DEPLOY: ${{ github.event_name == 'push' }}
         run: python server/build_prices.py --out site --previous "https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}"
 
       - name: Configure Pages

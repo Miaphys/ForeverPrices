@@ -3,9 +3,9 @@
 Auction house prices in your item tooltips for **World of Warcraft: Forever**, kept up to date
 automatically. No scanning, no setup screens: install the addon, run the companion app, done.
 
-### ⬇ [Download](https://miaphys.github.io/ForeverPrices/) · [All releases](https://github.com/Miaphys/ForeverPrices/releases)
+### ⬇ [Download](https://miaphys.github.io/ForeverPrices/) · [CurseForge](https://www.curseforge.com/wow/addons/foreverprices) · [All releases](https://github.com/Miaphys/ForeverPrices/releases)
 
-1. Extract the addon zip into `World of Warcraft\_forever_\Interface\AddOns`.
+1. Install the addon from [CurseForge](https://www.curseforge.com/wow/addons/foreverprices) (or extract the zip into `World of Warcraft\_forever_\Interface\AddOns`).
 2. Run `ForeverPrices.exe` (Windows may warn because it isn't code-signed: **More info → Run anyway**).
    A gold coin appears by your clock; it finds WoW and keeps prices up to date.
 3. Log in. On Normal and PvP, prices are in your tooltips right away; elsewhere search the AH once.
