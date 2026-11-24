@@ -28,7 +28,7 @@ jobs:
     timeout-minutes: 30
     environment:
       name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
+      url: ${{ steps.deploy_retry2.outputs.page_url || steps.deploy_retry1.outputs.page_url || steps.deploy.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
 
@@ -54,9 +54,32 @@ jobs:
         with:
           path: site
 
+      # deploy-pages sometimes looks for the artifact before GitHub has indexed it
+      # ("Found 0 artifact(s)") right after a successful upload. That is transient, so
+      # retry instead of failing the run (and mailing about it).
       - name: Deploy to GitHub Pages
         id: deploy
         if: steps.build.outputs.changed == 'true'
+        uses: actions/deploy-pages@v4
+        continue-on-error: true
+
+      - name: Wait before retrying deploy
+        if: steps.build.outputs.changed == 'true' && steps.deploy.outcome == 'failure'
+        run: sleep 30
+
+      - name: Deploy to GitHub Pages (retry 1)
+        id: deploy_retry1
+        if: steps.build.outputs.changed == 'true' && steps.deploy.outcome == 'failure'
+        uses: actions/deploy-pages@v4
+        continue-on-error: true
+
+      - name: Wait before retrying deploy again
+        if: steps.build.outputs.changed == 'true' && steps.deploy.outcome == 'failure' && steps.deploy_retry1.outcome == 'failure'
+        run: sleep 60
+
+      - name: Deploy to GitHub Pages (retry 2)
+        id: deploy_retry2
+        if: steps.build.outputs.changed == 'true' && steps.deploy.outcome == 'failure' && steps.deploy_retry1.outcome == 'failure'
         uses: actions/deploy-pages@v4
 
       # GitHub switches off scheduled workflows in public repos after 60 days without
